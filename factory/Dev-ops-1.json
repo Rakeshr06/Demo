@@ -1,0 +1,9 @@
+{
+	"name": "Dev-ops-1",
+	"location": "centralindia",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "442fec6b-7088-4e72-9f70-eaea45cf9f65",
+		"tenantId": "b3b380f7-4c00-4b2e-b115-ad701add980a"
+	}
+}
