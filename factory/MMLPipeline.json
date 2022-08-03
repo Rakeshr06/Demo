@@ -1,0 +1,9 @@
+{
+	"name": "MMLPipeline",
+	"location": "eastus2",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "044d6768-3a4c-4f11-8dc3-ce2cc728fbfd",
+		"tenantId": "b3b380f7-4c00-4b2e-b115-ad701add980a"
+	}
+}
