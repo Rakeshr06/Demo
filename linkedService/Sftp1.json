@@ -1,0 +1,47 @@
+{
+	"name": "Sftp1",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"parameters": {
+			"abc": {
+				"type": "String",
+				"defaultValue": "abc"
+			},
+			"abcd": {
+				"type": "String",
+				"defaultValue": "abcd"
+			},
+			"cba": {
+				"type": "String",
+				"defaultValue": "cba"
+			},
+			"host": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"type": "Sftp",
+		"typeProperties": {
+			"host": "@{linkedService().host}",
+			"port": 22,
+			"skipHostKeyValidation": true,
+			"authenticationType": "Basic",
+			"userName": "@{linkedService().cba}",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "AzureKeyVault1",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": {
+					"value": "@linkedService().abc",
+					"type": "Expression"
+				},
+				"secretVersion": {
+					"value": "@linkedService().abcd",
+					"type": "Expression"
+				}
+			}
+		}
+	}
+}
