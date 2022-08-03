@@ -1,0 +1,1107 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"workspaceName": {
+			"type": "string",
+			"metadata": "Workspace name",
+			"defaultValue": "mlldatalakeworkspacedev"
+		},
+		"AzureSqlDatabase_meta": {
+			"type": "string"
+		},
+		"SHIPX_DWH": {
+			"type": "string"
+		},
+		"mlldatalakeworkspacedev-WorkspaceDefaultStorage": {
+			"type": "string"
+		}
+	},
+	"variables": {
+		"workspaceId": "[concat('Microsoft.Synapse/workspaces/', parameters('workspaceName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('workspaceName'), '/SHIPX_avro')]",
+			"type": "Microsoft.Synapse/workspaces/pipelines",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"activities": [
+					{
+						"name": "List of Tables",
+						"type": "Lookup",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "SHIPXDWH_META1",
+								"type": "DatasetReference"
+							},
+							"firstRowOnly": false
+						}
+					},
+					{
+						"name": "ForEach1",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "List of Tables",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('List of Tables').output.value",
+								"type": "Expression"
+							},
+							"isSequential": false,
+							"activities": [
+								{
+									"name": "Lkp_Old_watermark",
+									"type": "Lookup",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"source": {
+											"type": "AzureSqlSource",
+											"sqlReaderQuery": {
+												"value": "select * from dbo.MyAvroControlTableShipX\nwhere SchemaName='@{item().SchemaName}' and TableName = '@{item().TableName}'",
+												"type": "Expression"
+											},
+											"queryTimeout": "02:00:00",
+											"partitionOption": "None"
+										},
+										"dataset": {
+											"referenceName": "OldWatermark_shipX",
+											"type": "DatasetReference"
+										}
+									}
+								},
+								{
+									"name": "Lkp_New_watermark",
+									"type": "Lookup",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"source": {
+											"type": "SqlServerSource",
+											"sqlReaderQuery": {
+												"value": "SELECT GETDATE() as Newwatermark ;",
+												"type": "Expression"
+											},
+											"queryTimeout": "02:00:00",
+											"partitionOption": "None"
+										},
+										"dataset": {
+											"referenceName": "Get_Max_Date_Sr",
+											"type": "DatasetReference"
+										},
+										"firstRowOnly": true
+									}
+								},
+								{
+									"name": "SHIPXDWH_COPY",
+									"type": "Copy",
+									"dependsOn": [
+										{
+											"activity": "Lkp_Old_watermark",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										},
+										{
+											"activity": "Lkp_New_watermark",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"source": {
+											"type": "SqlServerSource",
+											"sqlReaderQuery": {
+												"value": "select * from @{item().SchemaName}.@{item().TableName} where @{item().WatermarkColumnName} > '@{activity('Lkp_Old_watermark').output.firstRow.watermarkvalue}'\nand @{item().WatermarkColumnName} <= '@{activity('Lkp_New_watermark').output.firstRow.Newwatermark}'",
+												"type": "Expression"
+											},
+											"queryTimeout": "02:00:00",
+											"partitionOption": "None"
+										},
+										"sink": {
+											"type": "AvroSink",
+											"storeSettings": {
+												"type": "AzureBlobFSWriteSettings"
+											},
+											"formatSettings": {
+												"type": "AvroWriteSettings"
+											}
+										},
+										"enableStaging": false,
+										"translator": {
+											"type": "TabularTranslator",
+											"typeConversion": true,
+											"typeConversionSettings": {
+												"allowDataTruncation": true,
+												"treatBooleanAsNumber": false
+											}
+										}
+									},
+									"inputs": [
+										{
+											"referenceName": "SHIPXDWHSOURCE_200422",
+											"type": "DatasetReference",
+											"parameters": {
+												"TableName": {
+													"value": "@item().TableName",
+													"type": "Expression"
+												},
+												"SchemaName": {
+													"value": "@item().SchemaName",
+													"type": "Expression"
+												},
+												"WaterMarkColumn": {
+													"value": "@item().WatermarkColumnName",
+													"type": "Expression"
+												},
+												"WatermarkValue": {
+													"value": "@item().WatermarkValue",
+													"type": "Expression"
+												}
+											}
+										}
+									],
+									"outputs": [
+										{
+											"referenceName": "ShipXsinkAvro",
+											"type": "DatasetReference",
+											"parameters": {
+												"FileName": {
+													"value": "@concat(item().SchemaName,'_',item().TableName,'.avro')",
+													"type": "Expression"
+												},
+												"FolderPath": {
+													"value": "@concat(item().SchemaName,'_',item().TableName,'/',formatDateTime(utcnow(),'yyyy-MM-dd HH:MM'))",
+													"type": "Expression"
+												},
+												"MergeConditon": {
+													"value": "@item().MergeCondition",
+													"type": "Expression"
+												}
+											}
+										}
+									]
+								},
+								{
+									"name": "Stored procedure_SHIPX",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "SHIPXDWH_COPY",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[dbo].[upd_write_watermarkavro]",
+										"storedProcedureParameters": {
+											"LastModifiedtime": {
+												"value": {
+													"value": "@activity('Lkp_New_watermark').output.firstRow.Newwatermark",
+													"type": "Expression"
+												},
+												"type": "DateTime"
+											},
+											"TableName": {
+												"value": {
+													"value": "@{activity('Lkp_Old_watermark').output.firstRow.TableName}",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"WatermarkColumnName": {
+												"value": {
+													"value": "@{activity('Lkp_Old_watermark').output.firstRow.WatermarkColumnName}",
+													"type": "Expression"
+												},
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "[parameters('AzureSqlDatabase_meta')]",
+										"type": "LinkedServiceReference"
+									}
+								},
+								{
+									"name": "Load Delta",
+									"type": "ExecutePipeline",
+									"dependsOn": [
+										{
+											"activity": "SHIPXDWH_COPY",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"pipeline": {
+											"referenceName": "SHIPX_CSV_DELTA",
+											"type": "PipelineReference"
+										},
+										"waitOnCompletion": true,
+										"parameters": {
+											"Files": {
+												"value": "@concat(item().SchemaName,'_',item().TableName)",
+												"type": "Expression"
+											},
+											"FilePath": {
+												"value": "@concat(item().SchemaName,'_',item().TableName,'/',formatDateTime(utcnow(),'yyyy-dd-MM HH:MM'))",
+												"type": "Expression"
+											},
+											"MergeCondtion": {
+												"value": "@item().MergeCondition",
+												"type": "Expression"
+											}
+										}
+									}
+								}
+							]
+						}
+					}
+				],
+				"annotations": [],
+				"lastPublishTime": "2022-06-03T05:51:56Z"
+			},
+			"dependsOn": [
+				"[concat(variables('workspaceId'), '/datasets/SHIPXDWH_META1')]",
+				"[concat(variables('workspaceId'), '/datasets/OldWatermark_shipX')]",
+				"[concat(variables('workspaceId'), '/datasets/Get_Max_Date_Sr')]",
+				"[concat(variables('workspaceId'), '/datasets/SHIPXDWHSOURCE_200422')]",
+				"[concat(variables('workspaceId'), '/datasets/ShipXsinkAvro')]",
+				"[concat(variables('workspaceId'), '/pipelines/SHIPX_CSV_DELTA')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/SHIPXDWH_META1')]",
+			"type": "Microsoft.Synapse/workspaces/datasets",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('AzureSqlDatabase_meta')]",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "AzureSqlTable",
+				"schema": [],
+				"typeProperties": {
+					"schema": "dbo",
+					"table": "MyAvroControlTableShipX"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/OldWatermark_shipX')]",
+			"type": "Microsoft.Synapse/workspaces/datasets",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('AzureSqlDatabase_meta')]",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "AzureSqlTable",
+				"schema": [
+					{
+						"name": "SchemaName",
+						"type": "varchar"
+					},
+					{
+						"name": "TableName",
+						"type": "varchar"
+					},
+					{
+						"name": "IsIncremental",
+						"type": "bit"
+					},
+					{
+						"name": "WatermarkColumnName",
+						"type": "varchar"
+					},
+					{
+						"name": "WatermarkValue",
+						"type": "datetime",
+						"precision": 23,
+						"scale": 3
+					}
+				],
+				"typeProperties": {
+					"schema": "dbo",
+					"table": "MyControlTableSHIPX"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/Get_Max_Date_Sr')]",
+			"type": "Microsoft.Synapse/workspaces/datasets",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('SHIPX_DWH')]",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "SqlServerTable",
+				"schema": []
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/SHIPXDWHSOURCE_200422')]",
+			"type": "Microsoft.Synapse/workspaces/datasets",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('SHIPX_DWH')]",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"TableName": {
+						"type": "string"
+					},
+					"SchemaName": {
+						"type": "string"
+					},
+					"WaterMarkColumn": {
+						"type": "string"
+					},
+					"WatermarkValue": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "SqlServerTable",
+				"schema": [],
+				"typeProperties": {
+					"schema": {
+						"value": "@dataset().SchemaName",
+						"type": "Expression"
+					},
+					"table": {
+						"value": "@dataset().TableName",
+						"type": "Expression"
+					}
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/ShipXsinkAvro')]",
+			"type": "Microsoft.Synapse/workspaces/datasets",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('mlldatalakeworkspacedev-WorkspaceDefaultStorage')]",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"FileName": {
+						"type": "string"
+					},
+					"FolderPath": {
+						"type": "string"
+					},
+					"MergeConditon": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "Avro",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobFSLocation",
+						"fileName": {
+							"value": "@dataset().FileName",
+							"type": "Expression"
+						},
+						"folderPath": {
+							"value": "@dataset().FolderPath",
+							"type": "Expression"
+						},
+						"fileSystem": "datalakedev/Bronze_Raw/SHIPX_AVRO"
+					}
+				},
+				"schema": {}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/SHIPX_CSV_DELTA')]",
+			"type": "Microsoft.Synapse/workspaces/pipelines",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"activities": [
+					{
+						"name": "SHIPX_CSV_DELTA",
+						"type": "SynapseNotebook",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"notebook": {
+								"referenceName": "SHIPX_SILVER_DELTA_AVRO",
+								"type": "NotebookReference"
+							},
+							"parameters": {
+								"Files": {
+									"value": {
+										"value": "@pipeline().parameters.Files",
+										"type": "Expression"
+									},
+									"type": "string"
+								},
+								"bronze__root": {
+									"value": {
+										"value": "abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/",
+										"type": "Expression"
+									},
+									"type": "string"
+								},
+								"silver__root": {
+									"value": {
+										"value": "abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Silver_Transformed_Delta/Shipx_delta_Avro/",
+										"type": "Expression"
+									},
+									"type": "string"
+								},
+								"FilePath": {
+									"value": {
+										"value": "@pipeline().parameters.FilePath",
+										"type": "Expression"
+									},
+									"type": "string"
+								},
+								"MergeCondition": {
+									"value": {
+										"value": "@pipeline().parameters.MergeCondtion",
+										"type": "Expression"
+									},
+									"type": "string"
+								}
+							},
+							"snapshot": true,
+							"sparkPool": {
+								"referenceName": "SHIPXDELTAPOOL",
+								"type": "BigDataPoolReference"
+							}
+						}
+					}
+				],
+				"parameters": {
+					"Files": {
+						"type": "string",
+						"defaultValue": "FileName"
+					},
+					"FilePath": {
+						"type": "string",
+						"defaultValue": "FolderPath"
+					},
+					"MergeCondtion": {
+						"type": "string",
+						"defaultValue": "MergeCondtion"
+					}
+				},
+				"annotations": [],
+				"lastPublishTime": "2022-06-02T11:59:28Z"
+			},
+			"dependsOn": [
+				"[concat(variables('workspaceId'), '/notebooks/SHIPX_SILVER_DELTA_AVRO')]",
+				"[concat(variables('workspaceId'), '/bigDataPools/SHIPXDELTAPOOL')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/default')]",
+			"type": "Microsoft.Synapse/workspaces/managedVirtualNetworks",
+			"apiVersion": "2019-06-01-preview",
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/SHIPX_SILVER_DELTA_AVRO')]",
+			"type": "Microsoft.Synapse/workspaces/notebooks",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"nbformat": 4,
+				"nbformat_minor": 2,
+				"bigDataPool": {
+					"referenceName": "SHIPXDELTAPOOL",
+					"type": "BigDataPoolReference"
+				},
+				"sessionProperties": {
+					"driverMemory": "56g",
+					"driverCores": 8,
+					"executorMemory": "56g",
+					"executorCores": 8,
+					"numExecutors": 2,
+					"runAsWorkspaceSystemIdentity": false,
+					"conf": {
+						"spark.dynamicAllocation.enabled": "false",
+						"spark.dynamicAllocation.minExecutors": "2",
+						"spark.dynamicAllocation.maxExecutors": "2",
+						"spark.autotune.trackingId": "51abc939-95e7-4e12-b6c7-de701a33eb59"
+					}
+				},
+				"metadata": {
+					"saveOutput": true,
+					"synapse_widget": {
+						"version": "0.1"
+					},
+					"enableDebugMode": false,
+					"kernelspec": {
+						"name": "synapse_pyspark",
+						"display_name": "Synapse PySpark"
+					},
+					"language_info": {
+						"name": "python"
+					},
+					"a365ComputeOptions": {
+						"id": "/subscriptions/6660d141-49bf-45e8-92d2-e27be153f23c/resourceGroups/RG_MLL_datalake/providers/Microsoft.Synapse/workspaces/mlldatalakeworkspacedev/bigDataPools/SHIPXDELTAPOOL",
+						"name": "SHIPXDELTAPOOL",
+						"type": "Spark",
+						"endpoint": "https://mlldatalakeworkspacedev.dev.azuresynapse.net/livyApi/versions/2019-11-01-preview/sparkPools/SHIPXDELTAPOOL",
+						"auth": {
+							"type": "AAD",
+							"authResource": "https://dev.azuresynapse.net",
+							"authHeader": null
+						},
+						"sparkVersion": "3.2",
+						"nodeCount": 10,
+						"cores": 8,
+						"memory": 56,
+						"extraHeader": null
+					},
+					"sessionKeepAliveTimeout": 5
+				},
+				"cells": [
+					{
+						"cell_type": "code",
+						"metadata": {
+							"tags": [
+								"parameters"
+							]
+						},
+						"source": [
+							"#Files = \"sample.csv\"\r\n",
+							"Files = \"\"\r\n",
+							"FilePath = \"\"\r\n",
+							"MergeCondition = \"\"\r\n",
+							"#MergeCondition = \"source.id = target.id\"\r\n",
+							"bronze__root = \"\"\r\n",
+							"silver__root = \"\"\r\n",
+							"#abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Silver_Transformed_Delta/Shipx_delta_Avro/\r\n",
+							"#abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 54,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:33:37.5944322Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:33:37.7355381Z",
+										"execution_finish_time": "2022-06-02T11:33:37.8776612Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 54, Finished, Available)"
+								}
+							}
+						],
+						"execution_count": 53
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"#Getting file details\r\n",
+							"from notebookutils import mssparkutils\r\n",
+							"FolderName = Files.split(\".\")[0]\r\n",
+							"print(f\"{bronze__root}/{FolderName}/\")\r\n",
+							"#print(Files)\r\n",
+							"#files =mssparkutils.fs.ls(f\"{bronze__root}/\")\r\n",
+							"files =mssparkutils.fs.ls(f\"{bronze__root}/{FolderName}/\")"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 55,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:33:42.0701085Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:33:42.1738709Z",
+										"execution_finish_time": "2022-06-02T11:33:42.326942Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 55, Finished, Available)"
+								}
+							},
+							{
+								"name": "stdout",
+								"output_type": "stream",
+								"text": "abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/shipx_dwh_consignment_invoice/"
+							}
+						],
+						"execution_count": 54
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"fileInfos = []\r\n",
+							"for f in files:\r\n",
+							"    fileInfo = {}\r\n",
+							"    fileInfo[\"Fullpath\"] = f.path\r\n",
+							"    fileInfo[\"Datepart\"] = f.name\r\n",
+							"    #fileInfo[\"Datepart\"] = int(f.path.split(\"/\")[-1].replace(\"-\",\"\").replace(\" \",\"\").replace(\":\",\"\"))\r\n",
+							"    fileInfos.append(fileInfo)\r\n",
+							"# fileInfos"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 56,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:33:46.2546988Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:33:46.3615158Z",
+										"execution_finish_time": "2022-06-02T11:33:46.5130424Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 56, Finished, Available)"
+								}
+							},
+							{
+								"output_type": "display_data",
+								"data": {
+									"text/plain": "[[{'Fullpath': 'abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/shipx_dwh_consignment_invoice/2022-06-01 11:06',\n  'Datepart': '2022-06-01 11:06'},\n {'Fullpath': 'abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/shipx_dwh_consignment_invoice/2022-06-02 09:06',\n  'Datepart': '2022-06-02 09:06'}]"
+								}
+							}
+						],
+						"execution_count": 55
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"#sortedfile = sorted(fileInfos,key = lambda i: i['Datepart'], reverse=False)\r\n",
+							"import datetime\r\n",
+							"sortedfile = sorted(fileInfos,key = lambda i: datetime.datetime.strptime(i['Datepart'], \"%Y-%m-%d %H:%M\"), reverse=True)\r\n",
+							"# sortedfile"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 57,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:33:53.3552576Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:33:53.4534962Z",
+										"execution_finish_time": "2022-06-02T11:33:53.5993253Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 57, Finished, Available)"
+								}
+							},
+							{
+								"output_type": "display_data",
+								"data": {
+									"text/plain": "[[{'Fullpath': 'abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/shipx_dwh_consignment_invoice/2022-06-02 09:06',\n  'Datepart': '2022-06-02 09:06'},\n {'Fullpath': 'abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Bronze_Raw/SHIPX_AVRO/shipx_dwh_consignment_invoice/2022-06-01 11:06',\n  'Datepart': '2022-06-01 11:06'}]"
+								}
+							}
+						],
+						"execution_count": 56
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							},
+							"microsoft": {
+								"language": "python"
+							},
+							"collapsed": false
+						},
+						"source": [
+							"%%pyspark\r\n",
+							"# # load file from SHIPX Bronze_raw\r\n",
+							"#df = spark.read.load(f'{bronze__root}/{FilePath}/',format='csv',header= 'true', escapeQuotes='true')\r\n",
+							"\r\n",
+							"#df = spark.read.load(fileInfos[0][\"Fullpath\"], format='csv',header= 'true')\r\n",
+							"df = spark.read.load(sortedfile[0][\"Fullpath\"], format='avro',header= True, inferSchema=True)#mode=\"DROPMALFORMED\")\r\n",
+							""
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 63,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:35:50.4813106Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:35:50.5838121Z",
+										"execution_finish_time": "2022-06-02T11:35:51.6535316Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 63, Finished, Available)"
+								}
+							}
+						],
+						"execution_count": 62
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"# duplicate_id_in_source = df \\\r\n",
+							"#     .groupby(['id']) \\\r\n",
+							"#     .count() \\\r\n",
+							"#     .where('count > 1') \\\r\n",
+							"#     .sort('count', ascending=False) \\\r\n",
+							"#     .select(\"id\").collect()\r\n",
+							"# duplicate_id_in_source\r\n",
+							"\r\n",
+							"# df.select(['id'])\r\n",
+							"# new_df = df.select([\"id\",\"name\"])\r\n",
+							"# df.groupby(['id']).count().where('count > 1').sort('count', ascending=False).select(\"id\").show()"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 20,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:18:05.9715268Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:18:06.0774077Z",
+										"execution_finish_time": "2022-06-02T11:18:11.317797Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 20, Finished, Available)"
+								}
+							},
+							{
+								"name": "stdout",
+								"output_type": "stream",
+								"text": "+---+\n| id|\n+---+\n+---+"
+							}
+						],
+						"execution_count": 19
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"#new_df = df.dropDuplicates([\"id\"])\r\n",
+							"# new_df.show()\r\n",
+							"# new_df.groupBy([\"id\"]).count().where(\"count>1\").sort(\"count\", ascending=False).show()"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 171,
+										"statement_id": 43,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-05-26T09:31:51.9960538Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-05-26T09:31:52.0903401Z",
+										"execution_finish_time": "2022-05-26T09:31:52.5791056Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 171, 43, Finished, Available)"
+								}
+							},
+							{
+								"name": "stdout",
+								"output_type": "stream",
+								"text": "+---+----+\n| id|name|\n+---+----+\n|  1| sky|\n|  2|  my|\n|  3| why|\n|  4| raj|\n|  5| dad|\n+---+----+"
+							}
+						],
+						"execution_count": 42
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							}
+						},
+						"source": [
+							"# #Save into delta format\r\n",
+							"silverfilepath = Files\r\n",
+							"silver_folder_path = f'{silver__root}/{silverfilepath}/'\r\n",
+							"silver_folder_path\r\n",
+							"# df.write.format(\"delta\").mode(\"overwrite\").save(silver_folder_path)"
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 59,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:34:34.1105301Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:34:34.2029045Z",
+										"execution_finish_time": "2022-06-02T11:34:34.3558143Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 59, Finished, Available)"
+								}
+							},
+							{
+								"output_type": "display_data",
+								"data": {
+									"text/plain": "'abfss://datalakedev@mlldatalakedev.dfs.core.windows.net/Silver_Transformed_Delta/Shipx_delta_Avro//shipx_dwh_consignment_invoice/'"
+								}
+							}
+						],
+						"execution_count": 58
+					},
+					{
+						"cell_type": "code",
+						"metadata": {
+							"jupyter": {
+								"source_hidden": false,
+								"outputs_hidden": false
+							},
+							"nteract": {
+								"transient": {
+									"deleting": false
+								}
+							},
+							"collapsed": false
+						},
+						"source": [
+							"from delta.tables import *\r\n",
+							"from pyspark.sql.functions import *\r\n",
+							"\r\n",
+							"\r\n",
+							"if (DeltaTable.isDeltaTable(spark, silver_folder_path)):\r\n",
+							"  # display(df.limit(10))\r\n",
+							"  silver_df = DeltaTable.forPath(spark, silver_folder_path)\r\n",
+							"  silver_df.alias(\"target\").merge(df.alias(\"source\"), MergeCondition)\\\r\n",
+							"  .whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()\r\n",
+							"  # display(silver_df.toDF().show(60))\r\n",
+							"else:\r\n",
+							"    df.write.format(\"delta\").mode(\"overwrite\").save(silver_folder_path)\r\n",
+							"\r\n",
+							"#silver_df = DeltaTable.forPath(spark, silver_folder_path)\r\n",
+							"# # # # insert or update all columns in delta table\r\n",
+							"# silver_df.alias(\"target\").merge(source.alias(\"source\"), \"target.id = source.id\" )\\\r\n",
+							"# .whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()\r\n",
+							"\r\n",
+							"\r\n",
+							""
+						],
+						"attachments": null,
+						"outputs": [
+							{
+								"output_type": "display_data",
+								"data": {
+									"application/vnd.livy.statement-meta+json": {
+										"spark_pool": "SHIPXDELTAPOOL",
+										"session_id": 187,
+										"statement_id": 66,
+										"state": "finished",
+										"livy_statement_state": "available",
+										"queued_time": "2022-06-02T11:36:35.6806932Z",
+										"session_start_time": null,
+										"execution_start_time": "2022-06-02T11:36:35.7984166Z",
+										"execution_finish_time": "2022-06-02T11:36:44.3618575Z"
+									},
+									"text/plain": "StatementMeta(SHIPXDELTAPOOL, 187, 66, Finished, Available)"
+								}
+							}
+						],
+						"execution_count": 65
+					}
+				]
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('workspaceName'), '/SHIPXDELTAPOOL')]",
+			"type": "Microsoft.Synapse/workspaces/bigDataPools",
+			"apiVersion": "2019-06-01-preview",
+			"properties": {
+				"autoPause": {
+					"enabled": true,
+					"delayInMinutes": 15
+				},
+				"autoScale": {
+					"enabled": false,
+					"maxNodeCount": 10,
+					"minNodeCount": 3
+				},
+				"nodeCount": 4,
+				"nodeSize": "Medium",
+				"nodeSizeFamily": "MemoryOptimized",
+				"sparkVersion": "3.2",
+				"isComputeIsolationEnabled": false,
+				"sessionLevelPackagesEnabled": false,
+				"annotations": []
+			},
+			"dependsOn": [],
+			"location": "centralindia"
+		}
+	]
+}
