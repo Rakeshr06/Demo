@@ -25,18 +25,24 @@
 					}
 				}
 			],
-			"transformations": [],
+			"transformations": [
+				{
+					"name": "alterRow1"
+				}
+			],
 			"scriptLines": [
 				"parameters{",
 				"     Tablename as string,",
-				"     SQLQuery as string",
+				"     SQLQuery as string,",
+				"     pk_col as string",
 				"}",
 				"source(allowSchemaDrift: true,",
 				"     validateSchema: false,",
 				"     isolationLevel: 'READ_UNCOMMITTED',",
 				"     query: (\"select * from {$Tablename}\"),",
 				"     format: 'query') ~> source1",
-				"source1 sink(allowSchemaDrift: true,",
+				"source1 alterRow(upsertIf(true())) ~> alterRow1",
+				"alterRow1 sink(allowSchemaDrift: true,",
 				"     validateSchema: false,",
 				"     format: 'delta',",
 				"     container: 'delta-lake',",
@@ -48,7 +54,8 @@
 				"     deletable:false,",
 				"     insertable:true,",
 				"     updateable:false,",
-				"     upsertable:false) ~> sink1"
+				"     upsertable:true,",
+				"     keys:[($pk_col)]) ~> sink1"
 			]
 		}
 	}
