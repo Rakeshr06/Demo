@@ -5,7 +5,14 @@
 			{
 				"name": "Lookup1",
 				"type": "Lookup",
-				"dependsOn": [],
+				"dependsOn": [
+					{
+						"activity": "Set variable1",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
 				"policy": {
 					"timeout": "7.00:00:00",
 					"retry": 0,
@@ -17,7 +24,7 @@
 				"typeProperties": {
 					"source": {
 						"type": "SqlServerSource",
-						"sqlReaderQuery": "select id, Tablename,query from Metadata",
+						"sqlReaderQuery": "select id, Tablename,query,JSON_VALUE(PK,'$.pk_col') pk_col from Metadata",
 						"queryTimeout": "02:00:00",
 						"partitionOption": "None"
 					},
@@ -71,6 +78,10 @@
 										"SQLQuery": {
 											"value": "'@{item().Query}'",
 											"type": "Expression"
+										},
+										"pk_col": {
+											"value": "'@{item().pk_col}'",
+											"type": "Expression"
 										}
 									},
 									"datasetParameters": {
@@ -88,11 +99,70 @@
 								},
 								"traceLevel": "Fine"
 							}
+						},
+						{
+							"name": "Stored procedure1",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "Data flow1",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[Success_Fail]",
+								"storedProcedureParameters": {
+									"id": {
+										"value": "@item().id",
+										"type": "Int32"
+									},
+									"LMD": {
+										"value": {
+											"value": "@variables('Time')",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"sorf": {
+										"value": "S",
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SqlServer1",
+								"type": "LinkedServiceReference"
+							}
 						}
 					]
 				}
+			},
+			{
+				"name": "Set variable1",
+				"type": "SetVariable",
+				"dependsOn": [],
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "Time",
+					"value": "@formatDateTime(utcnow(),'yyyy/MM/dd HH:mm:ss')"
+				}
 			}
 		],
+		"variables": {
+			"Time": {
+				"type": "String"
+			}
+		},
 		"annotations": [],
 		"lastPublishTime": "2022-07-27T09:17:50Z"
 	},
