@@ -613,7 +613,7 @@
 						"typeProperties": {
 							"source": {
 								"type": "SqlServerSource",
-								"sqlReaderQuery": "select id, Tablename,query,JSON_VALUE(PK,'$.pk_col') pk_col from Metadata",
+								"sqlReaderQuery": "select id, Tablename,query,JSON_VALUE(PK,'$.pk_col') pk_col ,LMD,Success from Metadata",
 								"queryTimeout": "02:00:00",
 								"partitionOption": "None"
 							},
@@ -682,8 +682,7 @@
 													}
 												},
 												"sink1": {}
-											},
-											"linkedServiceParameters": {}
+											}
 										},
 										"staging": {},
 										"compute": {
@@ -716,7 +715,10 @@
 										"storedProcedureName": "[[dbo].[Success_Fail]",
 										"storedProcedureParameters": {
 											"id": {
-												"value": "@item().id",
+												"value": {
+													"value": "@item().id",
+													"type": "Expression"
+												},
 												"type": "Int32"
 											},
 											"LMD": {
@@ -747,7 +749,10 @@
 						"userProperties": [],
 						"typeProperties": {
 							"variableName": "Time",
-							"value": "@formatDateTime(utcnow(),'yyyy/MM/dd HH:mm:ss')"
+							"value": {
+								"value": "@formatDateTime(utcnow(),'yyyy/MM/dd HH:mm:ss')",
+								"type": "Expression"
+							}
 						}
 					}
 				],
