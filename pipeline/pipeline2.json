@@ -24,7 +24,7 @@
 				"typeProperties": {
 					"source": {
 						"type": "SqlServerSource",
-						"sqlReaderQuery": "select id, Tablename,query,JSON_VALUE(PK,'$.pk_col') pk_col from Metadata",
+						"sqlReaderQuery": "select id, Tablename,query,JSON_VALUE(PK,'$.pk_col') pk_col ,LMD,Success from Metadata",
 						"queryTimeout": "02:00:00",
 						"partitionOption": "None"
 					},
